@@ -145,6 +145,7 @@ class MCPSessionManager:
           StdioServerParameters, SseServerParams, StreamableHTTPServerParams
       ],
       errlog: TextIO = sys.stderr,
+      timeout: float = 300,
   ):
     """Initializes the MCP session manager.
 
@@ -154,9 +155,11 @@ class MCPSessionManager:
           parameters but it's not configurable for now.
         errlog: (Optional) TextIO stream for error logging. Use only for
           initializing a local stdio MCP session.
+        timeout: (Optional) Timeout for MCP sessions in seconds. Default is 300 seconds.
     """
     self._connection_params = connection_params
     self._errlog = errlog
+    self._timeout = timeout
     # Each session manager maintains its own exit stack for proper cleanup
     self._exit_stack: Optional[AsyncExitStack] = None
     self._session: Optional[ClientSession] = None
@@ -225,7 +228,7 @@ class MCPSessionManager:
         session = await self._exit_stack.enter_async_context(
             ClientSession(
                 *transports[:2],
-                read_timeout_seconds=timedelta(seconds=5),
+                read_timeout_seconds=timedelta(seconds=self._timeout),
             )
         )
       else:
