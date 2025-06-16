@@ -32,34 +32,29 @@ You have access to filesystem tools to read and display the generated data files
 PROCESS:
 1. Load and display the generated synthetic data from the output files
 2. Show a summary of what was generated (number of examples, format, etc.)
-3. Present the user with clear options and keywords:
+3. Present the user with clear options for next steps:
 
 **Your Options:**
 - **Accept Results** ✅ - End session successfully
-  Keywords: "accept", "good", "done", "finished"
-  
 - **Make Changes** 🔄 - Return to Seed Data Creator to modify seed data  
-  Keywords: "change", "modify", "back", "redo"
-  
 - **Return to Main Menu** 🏠 - Go back to greeting screen
-  Keywords: "menu", "home", "main"
 
 DISPLAY FORMAT:
 - Show a clear summary of generated data
 - Display a few example entries
 - Provide file locations and statistics
-- Present options with specific keywords clearly
+- Present options clearly
 
 RESPONSE STYLE:
 - Be congratulatory about the successful generation
 - Present data clearly and professionally
-- Make next steps obvious with keyword guidance
+- Make next steps obvious
 - Be helpful in guiding user decisions
 
 COMPLETION CRITERIA:
-User makes a clear choice using the specified keywords (accept, change, or menu).
+The routing system will automatically detect user intent and navigate appropriately.
 
-Remember: You handle State 6 (Review & Exit). Focus on presenting results clearly and facilitating user decisions with clear keyword options.''',
+Remember: You handle State 6 (Review & Exit). Focus on presenting results clearly and explaining the available options.''',
 
     tools=[
         MCPToolset(

@@ -23,6 +23,7 @@ import os
 import sys
 
 from .state_manager import StateManager, SystemState
+from .routing_agent import routing_agent
 from .greeting_agent import greeting_agent
 from .general_qa_agent import general_qa_agent
 from .knowledge_flow_agent import knowledge_flow_agent
@@ -72,6 +73,13 @@ class MultiAgentController:
             )
         }
         
+        # Initialize routing agent runner
+        self.routing_runner = InMemoryRunner(
+            agent=routing_agent,
+            app_name=f"{app_name}_routing"
+        )
+        self.routing_session: Optional[Session] = None
+        
         self.current_session: Optional[Session] = None
         self.user_id = 'default_user'
         
@@ -111,10 +119,6 @@ class MultiAgentController:
         
         if not self.current_session:
             await self.initialize_session()
-        
-        # Check for user completion signals before sending to agent
-        if self.state_manager.detect_completion_from_user_input(message):
-            self.state_manager.mark_user_approval()
         
         runner = self.runners[current_state]
         
@@ -161,67 +165,102 @@ class MultiAgentController:
         
         full_response = '\n'.join(response_parts) if response_parts else "I'm sorry, I couldn't generate a response. Please try again."
         
-        # Check for agent completion signals in the response
-        if self.state_manager.detect_completion_from_response(message): # detect completion indication from user input 
-            self.state_manager.mark_agent_completion()
-        
         # Check if state transition is needed
-        await self._check_state_transition()
+        await self._check_state_transition(message)
         
         return full_response
     
-    async def _check_state_transition(self):
-        """Check if current state is complete and transition if needed."""
+    async def _check_state_transition(self, user_message: str):
+        """Check if current state is complete and transition if needed using routing agent."""
         current_state = self.state_manager.get_current_state()
         
+        print(f"🔍 Checking state transition from {current_state.name}")
+        
         # Check completion criteria for current state
-        if self.state_manager.validate_state_completion():
+        completion_valid = self.state_manager.validate_state_completion()
+        print(f"🔍 State completion valid: {completion_valid}")
+        
+        if completion_valid:
             next_states = self.state_manager.get_next_valid_states()
+            print(f"🔍 Next valid states: {[s.name for s in next_states]}")
+            
             if next_states:
-                # Determine which next state to transition to based on context
-                next_state = self._determine_next_state(current_state, next_states)
-                if next_state and self.state_manager.transition_to(next_state):
-                    # Reset session for new agent
-                    self.current_session = None
-                    # Clear completion flags for the new state
-                    self.state_manager.set_state_data('agent_completed', False)
-                    self.state_manager.set_state_data('user_approved', False)
-                    print(f"🔄 **State Transition**: {current_state.name} → {next_state.name}")
-                    return True
+                # Use routing agent to determine next state
+                routing_decision = await self.get_routing_decision(user_message, current_state, next_states)
+                print(f"🔍 Routing decision: {routing_decision}")
+                
+                if routing_decision != 'STAY':
+                    # Find the target state
+                    target_state = None
+                    for state in next_states:
+                        if state.name == routing_decision:
+                            target_state = state
+                            break
+                    
+                    print(f"🔍 Target state found: {target_state.name if target_state else 'None'}")
+                    
+                    if target_state:
+                        can_transition = self.state_manager.can_transition_to(target_state)
+                        print(f"🔍 Can transition to {target_state.name}: {can_transition}")
+                        
+                        if can_transition:
+                            transition_success = self.state_manager.transition_to(target_state)
+                            print(f"🔍 Transition success: {transition_success}")
+                            
+                            if transition_success:
+                                # Reset session for new agent
+                                self.current_session = None
+                                # Clear completion flags for the new state
+                                self.state_manager.set_state_data('agent_completed', False)
+                                self.state_manager.set_state_data('user_approved', False)
+                                print(f"🔄 **State Transition**: {current_state.name} → {target_state.name}")
+                                return True
+        
+        # Also check for routing decisions even if state isn't "complete"
+        # This allows navigation from any state (like "menu" commands)
+        print(f"🔍 Checking global routing options...")
+        all_possible_states = [
+            SystemState.GREETING_INTENT,
+            SystemState.GENERAL_QA,
+            SystemState.KNOWLEDGE_FLOW,
+            SystemState.SKILLS_GREETING,
+            SystemState.SEED_DATA_CREATION,
+            SystemState.DATA_GENERATION,
+            SystemState.REVIEW_EXIT
+        ]
+        
+        routing_decision = await self.get_routing_decision(user_message, current_state, all_possible_states)
+        print(f"🔍 Global routing decision: {routing_decision}")
+        
+        if routing_decision != 'STAY':
+            # Find the target state
+            target_state = None
+            for state in all_possible_states:
+                if state.name == routing_decision:
+                    target_state = state
+                    break
+            
+            print(f"🔍 Global target state: {target_state.name if target_state else 'None'}")
+            
+            if target_state and target_state != current_state:
+                can_transition = self.state_manager.can_transition_to(target_state)
+                print(f"🔍 Global can transition: {can_transition}")
+                
+                if can_transition:
+                    transition_success = self.state_manager.transition_to(target_state)
+                    print(f"🔍 Global transition success: {transition_success}")
+                    
+                    if transition_success:
+                        # Reset session for new agent
+                        self.current_session = None
+                        # Clear completion flags for the new state
+                        self.state_manager.set_state_data('agent_completed', False)
+                        self.state_manager.set_state_data('user_approved', False)
+                        print(f"🔄 **State Transition**: {current_state.name} → {target_state.name}")
+                        return True
+        
+        print(f"🔍 No state transition occurred")
         return False
-    
-    def _determine_next_state(self, current_state: SystemState, next_states: list[SystemState]) -> SystemState:
-        """Determine which next state to transition to based on current state and context."""
-        if current_state == SystemState.GREETING_INTENT:
-            user_selection = self.state_manager.get_state_data('user_selection')
-            if user_selection == 'general_qa':
-                return SystemState.GENERAL_QA
-            elif user_selection == 'skills':
-                return SystemState.SKILLS_GREETING
-            elif user_selection == 'knowledge':
-                return SystemState.KNOWLEDGE_FLOW
-        
-        elif current_state == SystemState.SKILLS_GREETING:
-            # Route based on whether user has seed data
-            has_seed_data = self.state_manager.get_state_data('has_seed_data', None)
-            if has_seed_data is True:
-                # User has seed data, go directly to data generation
-                return SystemState.DATA_GENERATION
-            elif has_seed_data is False:
-                # User needs to create seed data
-                return SystemState.SEED_DATA_CREATION
-        
-        elif current_state == SystemState.REVIEW_EXIT:
-            # Route based on user's decision
-            user_decision = self.state_manager.get_state_data('user_decision', None)
-            if user_decision == 'change':
-                return SystemState.SEED_DATA_CREATION
-            elif user_decision == 'menu':
-                return SystemState.GREETING_INTENT
-            # If 'accept', don't transition (stay in current state or end)
-        
-        # For other states, take the first (primary) next state
-        return next_states[0] if next_states else None
     
     def get_current_state_info(self) -> Dict[str, Any]:
         """Get information about the current state."""
@@ -309,3 +348,91 @@ State-6 → State-4 (changes) | State-0 (menu)
                 if "exit cancel scope in a different task" not in str(e):
                     print(f"Warning: Error during MCP session cleanup: {e}", file=self._errlog)
         self.current_session = None 
+    
+    async def initialize_routing_session(self) -> Session:
+        """Initialize a session for the routing agent."""
+        if not self.routing_session:
+            self.routing_session = await self.routing_runner.session_service.create_session(
+                app_name=self.routing_runner.app_name,
+                user_id=self.user_id
+            )
+        return self.routing_session
+    
+    async def get_routing_decision(self, user_message: str, current_state: SystemState, legal_states: list[SystemState]) -> str:
+        """Get routing decision from the routing agent."""
+        try:
+            await self.initialize_routing_session()
+            
+            # Create routing prompt with current context
+            legal_state_names = [state.name for state in legal_states]
+            routing_prompt = f"""
+Current State: {current_state.name}
+Legal Next States: {', '.join(legal_state_names)}
+User Message: "{user_message}"
+
+Analyze the user's intent and respond with a JSON object containing the target state keyword.
+Only choose from the legal next states listed above, or use "STAY" if no transition is appropriate.
+"""
+            
+            print(f"🔍 Routing Debug - Current: {current_state.name}, Legal: {legal_state_names}")
+            print(f"🔍 User Message: {user_message}")
+            
+            content = types.Content(
+                role='user',
+                parts=[types.Part.from_text(text=routing_prompt)]
+            )
+            
+            response_parts = []
+            async for event in self.routing_runner.run_async(
+                user_id=self.user_id,
+                session_id=self.routing_session.id,
+                new_message=content,
+            ):
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if part.text:
+                            response_parts.append(part.text)
+            
+            routing_response = '\n'.join(response_parts)
+            print(f"🔍 Routing Agent Response: {routing_response}")
+            
+            # Parse JSON response
+            import json
+            try:
+                # Clean up the response - sometimes models add extra text
+                routing_response_clean = routing_response.strip()
+                if '```json' in routing_response_clean:
+                    # Extract JSON from code block
+                    start = routing_response_clean.find('{')
+                    end = routing_response_clean.rfind('}') + 1
+                    if start != -1 and end != 0:
+                        routing_response_clean = routing_response_clean[start:end]
+                
+                routing_data = json.loads(routing_response_clean)
+                target_state_name = routing_data.get('target_state', 'STAY')
+                
+                print(f"🔍 Parsed Target State: {target_state_name}")
+                
+                # Validate that the target state is legal
+                if target_state_name == 'STAY':
+                    return 'STAY'
+                
+                # Check if target state is in legal states
+                for state in legal_states:
+                    if state.name == target_state_name:
+                        print(f"✅ Valid routing decision: {target_state_name}")
+                        return target_state_name
+                
+                # If not found in legal states, log error and stay
+                print(f"⚠️ Routing agent suggested invalid state: {target_state_name}")
+                print(f"Legal states were: {legal_state_names}")
+                return 'STAY'
+                
+            except json.JSONDecodeError as e:
+                print(f"⚠️ Routing agent returned invalid JSON: {routing_response}")
+                print(f"JSON Error: {e}")
+                return 'STAY'
+                
+        except Exception as e:
+            print(f"⚠️ Error in routing decision: {e}")
+            return 'STAY' 

@@ -1,9 +1,7 @@
 {
-  "current_state": 6,
+  "current_state": 5,
   "state_data": {
-    "user_selection": "skills",
     "agent_completed": false,
-    "user_approved": false,
-    "has_seed_data": false
+    "user_approved": false
   }
 }

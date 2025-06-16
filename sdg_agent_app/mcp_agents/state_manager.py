@@ -17,7 +17,6 @@ import os
 from enum import Enum
 from typing import Optional, Dict, Any
 import asyncio
-import re
 
 
 class SystemState(Enum):
@@ -103,158 +102,11 @@ class StateManager:
         self._save_state()
         return True
     
-    def detect_completion_from_response(self, user_input: str) -> bool:
-        """Detect if the current state is complete based on user input patterns."""
-        user_input = user_input.lower()
-        
-        if self.current_state == SystemState.GREETING_INTENT:
-            # Look for user selecting an option and store their choice
-            if any(re.search(pattern, user_input) for pattern in [r"(?:general|q&a|question)", r"(?:1|option 1)"]):
-                self.set_state_data('user_selection', 'general_qa')
-                return True
-            elif any(re.search(pattern, user_input) for pattern in [r"(?:skills|skill data|skills data)", r"(?:2|option 2)"]):
-                self.set_state_data('user_selection', 'skills')
-                return True
-            elif any(re.search(pattern, user_input) for pattern in [r"(?:knowledge|knowledge data)", r"(?:3|option 3)"]):
-                self.set_state_data('user_selection', 'knowledge')
-                return True
-            return False
-        
-        elif self.current_state == SystemState.GENERAL_QA:
-            # Look for user wanting to return to main menu
-            completion_patterns = [
-                r"(?:back|return|main menu|home)",
-                r"(?:done|finished|exit)"
-            ]
-            return any(re.search(pattern, user_input) for pattern in completion_patterns)
-        
-        elif self.current_state == SystemState.KNOWLEDGE_FLOW:
-            # Look for user wanting to return to main menu
-            completion_patterns = [
-                r"(?:back|return|main menu|home)",
-                r"(?:ok|understood|got it)"
-            ]
-            return any(re.search(pattern, user_input) for pattern in completion_patterns)
-        
-        elif self.current_state == SystemState.SKILLS_GREETING:
-            # Look for user indicating they have seed data or not
-            completion_patterns = [
-                r"(?:yes|have|got|already)",
-                r"(?:no|don't|create|need)"
-            ]
-            return any(re.search(pattern, user_input) for pattern in completion_patterns)
-        
-        elif self.current_state == SystemState.SEED_DATA_CREATION:
-            # Look for user indicating seed data is ready
-            completion_patterns = [
-                r"(?:yes|looks? good|proceed|continue|next)",
-                r"seed data (?:is )?ready",
-                r"move to (?:next|generation)",
-                r"start generation",
-                r"next step",
-                r"next state",
-                r"next stage"
-            ]
-            return any(re.search(pattern, user_input) for pattern in completion_patterns)
-        
-        elif self.current_state == SystemState.DATA_GENERATION:
-            # Look for user confirming generation is complete
-            completion_patterns = [
-                r"looks? good",
-                r"that's enough",
-                r"next step",
-                r"next stage",
-                r"next state",
-                r"review"
-            ]
-            return any(re.search(pattern, user_input) for pattern in completion_patterns)
-        
-        elif self.current_state == SystemState.REVIEW_EXIT:
-            # Look for user accepting or wanting changes
-            if any(re.search(pattern, user_input) for pattern in [r"(?:accept|good|done|finished)"]):
-                self.set_state_data('user_decision', 'accept')
-                return True
-            elif any(re.search(pattern, user_input) for pattern in [r"(?:change|modify|back|redo)"]):
-                self.set_state_data('user_decision', 'change')
-                return True
-            elif any(re.search(pattern, user_input) for pattern in [r"(?:menu|home|main)"]):
-                self.set_state_data('user_decision', 'menu')
-                return True
-            return False
-        
-        return False
-    
-    def detect_completion_from_user_input(self, user_message: str) -> bool:
-        """Detect completion signals from user input."""
-        user_lower = user_message.lower()
-        
-        if self.current_state == SystemState.SKILLS_GREETING:
-            # Look for user indicating they have seed data or want to create it
-            has_seed_patterns = [
-                r"(?:yes|have|got|already)",
-                r"have.*seed.*data",
-                r"already.*have",
-                r"got.*file"
-            ]
-            need_create_patterns = [
-                r"(?:no|don't|create|need)",
-                r"don't.*have",
-                r"need.*create",
-                r"help.*create"
-            ]
-            
-            has_seed = any(re.search(pattern, user_lower) for pattern in has_seed_patterns)
-            need_create = any(re.search(pattern, user_lower) for pattern in need_create_patterns)
-            
-            if has_seed:
-                self.set_state_data('has_seed_data', True)
-                return True
-            elif need_create:
-                self.set_state_data('has_seed_data', False)
-                return True
-        
-        elif self.current_state == SystemState.SEED_DATA_CREATION:
-            # Look for user approval/acceptance
-            approval_patterns = [
-                r"(?:yes|approve|accept|good|ok|proceed)",
-                r"looks?\s+good",
-                r"that.s?\s+(?:fine|good|perfect|great)",
-                r"ready.*(?:to.*)?(?:proceed|continue|generate)",
-                r"move.*(?:to.*)?next"
-            ]
-            rejection_patterns = [
-                r"(?:no|reject|change|modify|improve|fix)",
-                r"not\s+(?:good|right|correct)",
-                r"needs?\s+(?:change|improvement|fix)"
-            ]
-            
-            has_approval = any(re.search(pattern, user_lower) for pattern in approval_patterns)
-            has_rejection = any(re.search(pattern, user_lower) for pattern in rejection_patterns)
-            
-            return has_approval and not has_rejection
-        
-        return False
-    
     def validate_state_completion(self) -> bool:
         """Validate that current state completion criteria are met based on interactions."""
-        if self.current_state == SystemState.GREETING_INTENT:
-            # Check if user has made a selection (general_qa, skills, or knowledge)
-            user_selection = self.get_state_data('user_selection', None)
-            return user_selection in ['general_qa', 'skills', 'knowledge']
+        # Simplified validation - routing agent handles most transitions
         
-        elif self.current_state == SystemState.GENERAL_QA:
-            # Check if user wants to return to main menu
-            return self.get_state_data('return_to_menu', False)
-        
-        elif self.current_state == SystemState.KNOWLEDGE_FLOW:
-            # Check if user acknowledged the placeholder message
-            return self.get_state_data('acknowledged', False)
-        
-        elif self.current_state == SystemState.SKILLS_GREETING:
-            # Check if user has indicated whether they have seed data
-            return self.get_state_data('has_seed_data', None) is not None
-        
-        elif self.current_state == SystemState.SEED_DATA_CREATION:
+        if self.current_state == SystemState.SEED_DATA_CREATION:
             # Check if agent has indicated completion
             return self.get_state_data('agent_completed', False)
         
@@ -262,11 +114,7 @@ class StateManager:
             # Check if agent has indicated generation completion
             return self.get_state_data('agent_completed', False)
         
-        elif self.current_state == SystemState.REVIEW_EXIT:
-            # Check if user has made a decision (accept, change, or menu)
-            user_decision = self.get_state_data('user_decision', None)
-            return user_decision in ['accept', 'change', 'menu']
-        
+        # For all other states, always allow routing agent to handle transitions
         return True
     
     def mark_agent_completion(self):

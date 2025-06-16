@@ -14,6 +14,7 @@
 
 from . import agent
 from .state_manager import StateManager, SystemState
+from .routing_agent import routing_agent
 from .greeting_agent import greeting_agent
 from .general_qa_agent import general_qa_agent
 from .knowledge_flow_agent import knowledge_flow_agent
@@ -31,6 +32,7 @@ __all__ = [
     'root_agent',
     'StateManager',
     'SystemState',
+    'routing_agent',
     'greeting_agent',
     'general_qa_agent',
     'knowledge_flow_agent',
