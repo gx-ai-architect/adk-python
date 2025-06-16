@@ -52,32 +52,37 @@ class MultiAgentWebWrapper(LlmAgent):
             name='multi_agent_sdg_system',
             instruction='''🤖 **Multi-Agent Synthetic Data Generation System**
 
-I am a multi-agent system that guides you through a structured 4-state workflow to generate synthetic training data:
+I am a multi-agent system that guides you through a structured workflow to generate synthetic training data:
+
+**Available Functions:**
+🔍 **General Q&A** - Ask questions about SDG Hub and InstructLab
+🎯 **Skills Data Generation** - Create synthetic training data for skills
+📚 **Knowledge Data** - (Coming soon - not yet supported)
 
 **State Flow:**
-State-1: Seed Data Creation → State-2: Seed Data Iteration → State-3: Data Generation → State-4: Close/Restart
-
-**Current Capabilities:**
-- 🌱 **State-1**: Create structured seed data from your requirements
-- 🔄 **State-2**: Refine seed data based on your feedback  
-- ⚡ **State-3**: Generate synthetic training data using SDG hub
-- 🎯 **State-4**: Complete session or start new cycle
+State-0: Greeting & Intent Detection → Route to appropriate function
+State-1: General Q&A ↔ State-0 (Main Menu)
+State-2: Knowledge Flow (Placeholder) ↔ State-0 (Main Menu)
+State-3: Skills Greeting → State-4 or State-5 (based on seed data availability)
+State-4: Seed Data Creator → State-5: Data Generator → State-6: Review & Exit
+State-6: Review & Exit → State-4 (changes) or State-0 (menu)
 
 **How to Use:**
-1. Describe your data requirements to create seed data
-2. Provide feedback to refine the seed data
-3. Specify generation parameters for synthetic data
-4. Choose to restart or close when complete
+1. **Start**: System greets you and asks what you'd like to do
+2. **Choose**: Select from General Q&A, Skills Data Generation, or Knowledge Data
+3. **Skills Path**: If you choose skills, system asks if you have seed data
+   - No seed data → Create seed data → Generate synthetic data → Review
+   - Have seed data → Generate synthetic data → Review
+4. **Complete**: Review results and choose next steps
 
 **Special Commands (available from any state):**
-- Type 'status' to see current state
-- Type 'help' for detailed guidance
-- Type 'restart' or 'reset' to start fresh from State-1
-- System automatically transitions between states based on completion criteria
+- Type 'status' to see current state information
+- Type 'help' for detailed guidance  
+- Type 'restart' or 'reset' to start fresh from State-0
 
-**Fresh Start:** The system starts fresh each session in State-1 (Seed Data Creation).
+**Fresh Start:** The system starts fresh each session in State-0 (Greeting & Intent Detection).
 
-Let's start! Please describe what kind of training data you need to generate.''',
+Welcome! What would you like to do today?''',
             
             tools=[
                 MCPToolset(
@@ -165,24 +170,31 @@ Let's start! Please describe what kind of training data you need to generate.'''
 **Description**: {state_info['description']}
 
 **System States:**
-- 🌱 **State-1**: Seed Data Creation - Create structured seed data from requirements
-- 🔄 **State-2**: Seed Data Iteration - Refine seed data based on feedback  
-- ⚡ **State-3**: Data Generation - Generate synthetic training data
-- 🎯 **State-4**: Close/Restart - Complete session or start over
+- 👋 **State-0**: Greeting & Intent Detection - Welcome and route users
+- 🔍 **State-1**: General Q&A - Answer questions about SDG Hub and InstructLab
+- 📚 **State-2**: Knowledge Flow - Handle knowledge data requests (placeholder)
+- 🎯 **State-3**: Skills Greeting - Explain skills data and determine starting point
+- 🌱 **State-4**: Seed Data Creator - Create structured seed data from requirements
+- ⚡ **State-5**: Data Generator - Generate synthetic training data
+- 📊 **State-6**: Review & Exit - Review results and choose next steps
 
 **Commands:**
 - `status` - Show current system state and information
 - `help` - Show this help message
+- `restart` - Start fresh from State-0
 
 **Current State Actions:**
-- **State-1**: Describe your data requirements
-- **State-2**: Provide feedback on seed data or approve it
-- **State-3**: Specify generation parameters (count, variation, format)
-- **State-4**: Type 'restart' for new cycle or 'close' to end
+- **State-0**: Choose from General Q&A, Skills Data Generation, or Knowledge Data
+- **State-1**: Ask questions about SDG Hub, InstructLab, or synthetic data generation
+- **State-2**: Acknowledge that knowledge data is not yet supported
+- **State-3**: Indicate whether you have seed data or need to create it
+- **State-4**: Describe your data requirements and approve seed data
+- **State-5**: Specify generation parameters and review progress
+- **State-6**: Accept results, request changes, or return to main menu
 
 **Completion Criteria**: {state_info['completion_criteria']}
 
-**Flow**: State-1 → State-2 → State-3 → State-4 → State-1 (loop)
+**Flow**: State-0 → (State-1|State-2|State-3) → State-4 → State-5 → State-6
 
 Ready to continue? I'm here to help with your synthetic data generation needs!"""
 

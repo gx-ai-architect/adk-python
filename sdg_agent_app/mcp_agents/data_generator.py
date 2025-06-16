@@ -52,7 +52,7 @@ COMPLETION CRITERIA:
 - Generation summary provided to user
 - Mark generation as completed
 
-Remember: You handle State-3 (Data Generation). Once complete, inform that system can proceed to State-4 (Close/Restart).''',
+Remember: You handle State 5 (Data Generator). Once complete, inform that system can proceed to State 6 (Review & Exit).''',
 
     tools=[
         MCPToolset(

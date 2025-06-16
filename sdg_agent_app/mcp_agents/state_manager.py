@@ -22,10 +22,13 @@ import re
 
 class SystemState(Enum):
     """System states for the synthetic data generation flow."""
-    SEED_DATA_CREATION = 1
-    SEED_DATA_ITERATION = 2
-    DATA_GENERATION = 3
-    CLOSE_RESTART = 4
+    GREETING_INTENT = 0          # State 0 - Greeting & Intent Detection
+    GENERAL_QA = 1               # State 1 - General Q&A
+    KNOWLEDGE_FLOW = 2           # State 2 - Knowledge Flow (Placeholder)
+    SKILLS_GREETING = 3          # State 3 - Skills Greeting
+    SEED_DATA_CREATION = 4       # State 4 - Seed Data Creator (was State 1)
+    DATA_GENERATION = 5          # State 5 - Data Generator (was State 3)
+    REVIEW_EXIT = 6              # State 6 - Review & Exit
 
 
 class StateManager:
@@ -33,7 +36,7 @@ class StateManager:
     
     def __init__(self, state_file_path: str = "system_state.json", start_fresh: bool = False):
         self.state_file_path = state_file_path
-        self.current_state = SystemState.SEED_DATA_CREATION
+        self.current_state = SystemState.GREETING_INTENT  # Start with greeting state
         self.state_data: Dict[str, Any] = {}
         
         if start_fresh:
@@ -47,11 +50,11 @@ class StateManager:
             try:
                 with open(self.state_file_path, 'r') as f:
                     data = json.load(f)
-                    self.current_state = SystemState(data.get('current_state', 1))
+                    self.current_state = SystemState(data.get('current_state', 0))  # Default to greeting
                     self.state_data = data.get('state_data', {})
             except (json.JSONDecodeError, ValueError, KeyError):
                 # If file is corrupted, start fresh
-                self.current_state = SystemState.SEED_DATA_CREATION
+                self.current_state = SystemState.GREETING_INTENT
                 self.state_data = {}
     
     def _save_state(self):
@@ -79,10 +82,13 @@ class StateManager:
     def can_transition_to(self, target_state: SystemState) -> bool:
         """Check if transition to target state is allowed."""
         transitions = {
-            SystemState.SEED_DATA_CREATION: [SystemState.SEED_DATA_ITERATION],
-            SystemState.SEED_DATA_ITERATION: [SystemState.DATA_GENERATION, SystemState.SEED_DATA_ITERATION],
-            SystemState.DATA_GENERATION: [SystemState.CLOSE_RESTART],
-            SystemState.CLOSE_RESTART: [SystemState.SEED_DATA_CREATION]
+            SystemState.GREETING_INTENT: [SystemState.GENERAL_QA, SystemState.KNOWLEDGE_FLOW, SystemState.SKILLS_GREETING],
+            SystemState.GENERAL_QA: [SystemState.GREETING_INTENT],
+            SystemState.KNOWLEDGE_FLOW: [SystemState.GREETING_INTENT],
+            SystemState.SKILLS_GREETING: [SystemState.SEED_DATA_CREATION, SystemState.DATA_GENERATION, SystemState.GREETING_INTENT],
+            SystemState.SEED_DATA_CREATION: [SystemState.DATA_GENERATION, SystemState.GREETING_INTENT],
+            SystemState.DATA_GENERATION: [SystemState.REVIEW_EXIT, SystemState.GREETING_INTENT],
+            SystemState.REVIEW_EXIT: [SystemState.SEED_DATA_CREATION, SystemState.GREETING_INTENT]
         }
         return target_state in transitions.get(self.current_state, [])
     
@@ -101,38 +107,55 @@ class StateManager:
         """Detect if the current state is complete based on user input patterns."""
         user_input = user_input.lower()
         
-        if self.current_state == SystemState.SEED_DATA_CREATION:
+        if self.current_state == SystemState.GREETING_INTENT:
+            # Look for user selecting an option and store their choice
+            if any(re.search(pattern, user_input) for pattern in [r"(?:general|q&a|question)", r"(?:1|option 1)"]):
+                self.set_state_data('user_selection', 'general_qa')
+                return True
+            elif any(re.search(pattern, user_input) for pattern in [r"(?:skills|skill data|skills data)", r"(?:2|option 2)"]):
+                self.set_state_data('user_selection', 'skills')
+                return True
+            elif any(re.search(pattern, user_input) for pattern in [r"(?:knowledge|knowledge data)", r"(?:3|option 3)"]):
+                self.set_state_data('user_selection', 'knowledge')
+                return True
+            return False
+        
+        elif self.current_state == SystemState.GENERAL_QA:
+            # Look for user wanting to return to main menu
+            completion_patterns = [
+                r"(?:back|return|main menu|home)",
+                r"(?:done|finished|exit)"
+            ]
+            return any(re.search(pattern, user_input) for pattern in completion_patterns)
+        
+        elif self.current_state == SystemState.KNOWLEDGE_FLOW:
+            # Look for user wanting to return to main menu
+            completion_patterns = [
+                r"(?:back|return|main menu|home)",
+                r"(?:ok|understood|got it)"
+            ]
+            return any(re.search(pattern, user_input) for pattern in completion_patterns)
+        
+        elif self.current_state == SystemState.SKILLS_GREETING:
+            # Look for user indicating they have seed data or not
+            completion_patterns = [
+                r"(?:yes|have|got|already)",
+                r"(?:no|don't|create|need)"
+            ]
+            return any(re.search(pattern, user_input) for pattern in completion_patterns)
+        
+        elif self.current_state == SystemState.SEED_DATA_CREATION:
             # Look for user indicating seed data is ready
             completion_patterns = [
                 r"(?:yes|looks? good|proceed|continue|next)",
                 r"seed data (?:is )?ready",
-                r"move to (?:next|iteration)",
-                r"start iterating",
+                r"move to (?:next|generation)",
+                r"start generation",
                 r"next step",
                 r"next state",
                 r"next stage"
             ]
             return any(re.search(pattern, user_input) for pattern in completion_patterns)
-        
-        elif self.current_state == SystemState.SEED_DATA_ITERATION:
-            # Look for user approval to move to data generation
-            completion_patterns = [
-                r"(?:yes|approved|accept|good|ok|proceed)",
-                r"ready to generate",
-                r"start generation",
-                r"move to generation",
-                r"next step",
-                r"next state",
-                r"next stage"
-            ]
-            rejection_patterns = [
-                r"(?:no|not yet|wait|hold|stop)",
-                r"needs? (?:more|changes|work)",
-                r"not (?:good|ready)",
-            ]
-            has_approval = any(re.search(pattern, user_input) for pattern in completion_patterns)
-            has_rejection = any(re.search(pattern, user_input) for pattern in rejection_patterns)
-            return has_approval and not has_rejection
         
         elif self.current_state == SystemState.DATA_GENERATION:
             # Look for user confirming generation is complete
@@ -142,14 +165,55 @@ class StateManager:
                 r"next step",
                 r"next stage",
                 r"next state",
+                r"review"
             ]
             return any(re.search(pattern, user_input) for pattern in completion_patterns)
+        
+        elif self.current_state == SystemState.REVIEW_EXIT:
+            # Look for user accepting or wanting changes
+            if any(re.search(pattern, user_input) for pattern in [r"(?:accept|good|done|finished)"]):
+                self.set_state_data('user_decision', 'accept')
+                return True
+            elif any(re.search(pattern, user_input) for pattern in [r"(?:change|modify|back|redo)"]):
+                self.set_state_data('user_decision', 'change')
+                return True
+            elif any(re.search(pattern, user_input) for pattern in [r"(?:menu|home|main)"]):
+                self.set_state_data('user_decision', 'menu')
+                return True
+            return False
         
         return False
     
     def detect_completion_from_user_input(self, user_message: str) -> bool:
         """Detect completion signals from user input."""
-        if self.current_state == SystemState.SEED_DATA_ITERATION:
+        user_lower = user_message.lower()
+        
+        if self.current_state == SystemState.SKILLS_GREETING:
+            # Look for user indicating they have seed data or want to create it
+            has_seed_patterns = [
+                r"(?:yes|have|got|already)",
+                r"have.*seed.*data",
+                r"already.*have",
+                r"got.*file"
+            ]
+            need_create_patterns = [
+                r"(?:no|don't|create|need)",
+                r"don't.*have",
+                r"need.*create",
+                r"help.*create"
+            ]
+            
+            has_seed = any(re.search(pattern, user_lower) for pattern in has_seed_patterns)
+            need_create = any(re.search(pattern, user_lower) for pattern in need_create_patterns)
+            
+            if has_seed:
+                self.set_state_data('has_seed_data', True)
+                return True
+            elif need_create:
+                self.set_state_data('has_seed_data', False)
+                return True
+        
+        elif self.current_state == SystemState.SEED_DATA_CREATION:
             # Look for user approval/acceptance
             approval_patterns = [
                 r"(?:yes|approve|accept|good|ok|proceed)",
@@ -164,7 +228,6 @@ class StateManager:
                 r"needs?\s+(?:change|improvement|fix)"
             ]
             
-            user_lower = user_message.lower()
             has_approval = any(re.search(pattern, user_lower) for pattern in approval_patterns)
             has_rejection = any(re.search(pattern, user_lower) for pattern in rejection_patterns)
             
@@ -174,19 +237,35 @@ class StateManager:
     
     def validate_state_completion(self) -> bool:
         """Validate that current state completion criteria are met based on interactions."""
-        if self.current_state == SystemState.SEED_DATA_CREATION:
+        if self.current_state == SystemState.GREETING_INTENT:
+            # Check if user has made a selection (general_qa, skills, or knowledge)
+            user_selection = self.get_state_data('user_selection', None)
+            return user_selection in ['general_qa', 'skills', 'knowledge']
+        
+        elif self.current_state == SystemState.GENERAL_QA:
+            # Check if user wants to return to main menu
+            return self.get_state_data('return_to_menu', False)
+        
+        elif self.current_state == SystemState.KNOWLEDGE_FLOW:
+            # Check if user acknowledged the placeholder message
+            return self.get_state_data('acknowledged', False)
+        
+        elif self.current_state == SystemState.SKILLS_GREETING:
+            # Check if user has indicated whether they have seed data
+            return self.get_state_data('has_seed_data', None) is not None
+        
+        elif self.current_state == SystemState.SEED_DATA_CREATION:
             # Check if agent has indicated completion
             return self.get_state_data('agent_completed', False)
-        
-        elif self.current_state == SystemState.SEED_DATA_ITERATION:
-            # Check if user has approved or max iterations reached
-            return (self.get_state_data('user_approved', False) or 
-                   self.get_state_data('agent_completed', False) or
-                   self.get_state_data('iteration_count', 0) >= self.get_state_data('max_iterations', 3))
         
         elif self.current_state == SystemState.DATA_GENERATION:
             # Check if agent has indicated generation completion
             return self.get_state_data('agent_completed', False)
+        
+        elif self.current_state == SystemState.REVIEW_EXIT:
+            # Check if user has made a decision (accept, change, or menu)
+            user_decision = self.get_state_data('user_decision', None)
+            return user_decision in ['accept', 'change', 'menu']
         
         return True
     
@@ -200,17 +279,20 @@ class StateManager:
     
     def reset_to_initial_state(self):
         """Reset system to initial state."""
-        self.current_state = SystemState.SEED_DATA_CREATION
+        self.current_state = SystemState.GREETING_INTENT
         self.state_data = {}
         self._save_state()
     
     def get_next_valid_states(self) -> list[SystemState]:
         """Get list of valid next states from current state."""
         transitions = {
-            SystemState.SEED_DATA_CREATION: [SystemState.SEED_DATA_ITERATION],
-            SystemState.SEED_DATA_ITERATION: [SystemState.DATA_GENERATION],
-            SystemState.DATA_GENERATION: [SystemState.CLOSE_RESTART],
-            SystemState.CLOSE_RESTART: [SystemState.SEED_DATA_CREATION]
+            SystemState.GREETING_INTENT: [SystemState.GENERAL_QA, SystemState.KNOWLEDGE_FLOW, SystemState.SKILLS_GREETING],
+            SystemState.GENERAL_QA: [SystemState.GREETING_INTENT],
+            SystemState.KNOWLEDGE_FLOW: [SystemState.GREETING_INTENT],
+            SystemState.SKILLS_GREETING: [SystemState.SEED_DATA_CREATION, SystemState.DATA_GENERATION],
+            SystemState.SEED_DATA_CREATION: [SystemState.DATA_GENERATION],
+            SystemState.DATA_GENERATION: [SystemState.REVIEW_EXIT],
+            SystemState.REVIEW_EXIT: [SystemState.SEED_DATA_CREATION, SystemState.GREETING_INTENT]
         }
         return transitions.get(self.current_state, [])
     
@@ -224,7 +306,7 @@ class StateManager:
                 print(f"⚠️  Could not delete state file: {e}")
         
         # Reset to initial state
-        self.current_state = SystemState.SEED_DATA_CREATION
+        self.current_state = SystemState.GREETING_INTENT
         self.state_data = {}
     
     def force_fresh_start(self):

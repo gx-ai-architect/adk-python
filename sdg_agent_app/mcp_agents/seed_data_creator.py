@@ -38,10 +38,11 @@ STRICT RESPONSIBILITIES:
 1. Analyze user data requirements (description or raw data)
 2. Create multiple well-structured seed data examples in JSONL format (newline-delimited JSON objects)
 3. Follow the exact seed data format specification for each example
-5. If requirements are unclear, creatively generate diverse examples
-6. Save all examples to .session_tmp/seed_data.jsonl using the available file writing tools;
-7. Read .session_tmp/seed_data.jsonl to verify that the file is saved correctly. If not, go to step 6 to save again.
-8. Show examples to user of the generated seed data.
+4. If requirements are unclear, creatively generate diverse examples
+5. Save all examples to .session_tmp/seed_data.jsonl using the available file writing tools
+6. Read .session_tmp/seed_data.jsonl to verify that the file is saved correctly. If not, go to step 5 to save again.
+7. Show examples to user of the generated seed data.
+8. Allow user to request modifications and iterate until they approve
 
 SEED DATA FORMAT (MANDATORY):
 {
@@ -52,9 +53,11 @@ SEED DATA FORMAT (MANDATORY):
 
 PROCESS:
 1. Ask user for their data requirements if not provided
-2. Create multiple seed data examples that captures the essence of their needs
+2. Create multiple seed data examples that capture the essence of their needs
 3. Save as 'seed_data.jsonl' in the .session_tmp folder using the available file writing tools
-4. Confirm successful creation
+4. Show examples to user and ask for feedback
+5. Iterate based on feedback until user approves
+6. Confirm successful creation and readiness for data generation
 
 VALIDATION RULES:
 - All three fields (task_description, seed_question, seed_response) must be present
@@ -63,7 +66,7 @@ VALIDATION RULES:
 - seed_response should be a high-quality example output
 - JSONL must be valid and properly formatted
 
-Remember: You only handle State-1 (Seed Data Creation). Once you create valid seed data, inform the user that the seed data is ready.''',
+Remember: You handle State 4 (Seed Data Creator). Once you create valid seed data and user approves, inform that the system can proceed to data generation.''',
 
     tools=[
         MCPToolset(

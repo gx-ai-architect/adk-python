@@ -23,9 +23,13 @@ import os
 import sys
 
 from .state_manager import StateManager, SystemState
+from .greeting_agent import greeting_agent
+from .general_qa_agent import general_qa_agent
+from .knowledge_flow_agent import knowledge_flow_agent
+from .skills_greeting_agent import skills_greeting_agent
 from .seed_data_creator import seed_data_creator_agent
-from .seed_data_iterator import seed_data_iterator_agent
 from .data_generator import data_generator_agent
+from .review_exit_agent import review_exit_agent
 
 
 class MultiAgentController:
@@ -38,17 +42,33 @@ class MultiAgentController:
         
         # Initialize runners for each agent
         self.runners = {
+            SystemState.GREETING_INTENT: InMemoryRunner(
+                agent=greeting_agent,
+                app_name=f"{app_name}_greeting"
+            ),
+            SystemState.GENERAL_QA: InMemoryRunner(
+                agent=general_qa_agent,
+                app_name=f"{app_name}_general_qa"
+            ),
+            SystemState.KNOWLEDGE_FLOW: InMemoryRunner(
+                agent=knowledge_flow_agent,
+                app_name=f"{app_name}_knowledge_flow"
+            ),
+            SystemState.SKILLS_GREETING: InMemoryRunner(
+                agent=skills_greeting_agent,
+                app_name=f"{app_name}_skills_greeting"
+            ),
             SystemState.SEED_DATA_CREATION: InMemoryRunner(
                 agent=seed_data_creator_agent,
                 app_name=f"{app_name}_seed_creator"
             ),
-            SystemState.SEED_DATA_ITERATION: InMemoryRunner(
-                agent=seed_data_iterator_agent,
-                app_name=f"{app_name}_seed_iterator"
-            ),
             SystemState.DATA_GENERATION: InMemoryRunner(
                 agent=data_generator_agent,
                 app_name=f"{app_name}_data_generator"
+            ),
+            SystemState.REVIEW_EXIT: InMemoryRunner(
+                agent=review_exit_agent,
+                app_name=f"{app_name}_review_exit"
             )
         }
         
@@ -63,10 +83,6 @@ class MultiAgentController:
     async def initialize_session(self) -> Session:
         """Initialize a session for the current state's agent."""
         current_state = self.state_manager.get_current_state()
-        
-        if current_state == SystemState.CLOSE_RESTART:
-            # Handle close/restart state
-            return None
         
         runner = self.runners.get(current_state)
         if not runner:
@@ -89,19 +105,16 @@ class MultiAgentController:
             self.state_manager.force_fresh_start()
             self.current_session = None  # Reset session
             return ("🔄 **System Reset Complete**\n\n"
-                   "Returned to **State-1: Seed Data Creation**\n\n"
-                   "All previous state has been cleared. Ready to create new seed data.\n"
-                   "Please describe what kind of training data you need to generate.")
+                   "Returned to **State 0: Greeting & Intent Detection**\n\n"
+                   "All previous state has been cleared. Ready to start fresh.\n"
+                   "What would you like to do today?")
         
-        if current_state == SystemState.CLOSE_RESTART:
-            return self._handle_close_restart_state(message)
+        if not self.current_session:
+            await self.initialize_session()
         
         # Check for user completion signals before sending to agent
         if self.state_manager.detect_completion_from_user_input(message):
             self.state_manager.mark_user_approval()
-        
-        if not self.current_session:
-            await self.initialize_session()
         
         runner = self.runners[current_state]
         
@@ -157,30 +170,6 @@ class MultiAgentController:
         
         return full_response
     
-    def _handle_close_restart_state(self, message: str) -> str:
-        """Handle messages in the close/restart state."""
-        message_lower = message.lower().strip()
-        
-        if any(keyword in message_lower for keyword in ['restart', 'start over', 'new', 'begin']):
-            # Reset to initial state
-            self.state_manager.reset_to_initial_state()
-            self.current_session = None
-            return ("🔄 **System Reset Complete**\n\n"
-                   "Returning to **State-1: Seed Data Creation**\n\n"
-                   "Ready to create new seed data. Please describe your data requirements.")
-        
-        elif any(keyword in message_lower for keyword in ['close', 'exit', 'quit', 'done']):
-            return ("👋 **Session Closed**\n\n"
-                   "Thank you for using the Synthetic Data Generation system!\n"
-                   "Session has been terminated.")
-        
-        else:
-            return ("🔄 **State-4: Close/Restart**\n\n"
-                   "Data generation is complete! Choose your next action:\n"
-                   "- Type 'restart' or 'start over' to begin a new generation cycle\n"
-                   "- Type 'close' or 'exit' to end the session\n\n"
-                   f"Current message: {message}")
-    
     async def _check_state_transition(self):
         """Check if current state is complete and transition if needed."""
         current_state = self.state_manager.get_current_state()
@@ -189,8 +178,9 @@ class MultiAgentController:
         if self.state_manager.validate_state_completion():
             next_states = self.state_manager.get_next_valid_states()
             if next_states:
-                next_state = next_states[0]  # Take the primary next state
-                if self.state_manager.transition_to(next_state):
+                # Determine which next state to transition to based on context
+                next_state = self._determine_next_state(current_state, next_states)
+                if next_state and self.state_manager.transition_to(next_state):
                     # Reset session for new agent
                     self.current_session = None
                     # Clear completion flags for the new state
@@ -199,6 +189,39 @@ class MultiAgentController:
                     print(f"🔄 **State Transition**: {current_state.name} → {next_state.name}")
                     return True
         return False
+    
+    def _determine_next_state(self, current_state: SystemState, next_states: list[SystemState]) -> SystemState:
+        """Determine which next state to transition to based on current state and context."""
+        if current_state == SystemState.GREETING_INTENT:
+            user_selection = self.state_manager.get_state_data('user_selection')
+            if user_selection == 'general_qa':
+                return SystemState.GENERAL_QA
+            elif user_selection == 'skills':
+                return SystemState.SKILLS_GREETING
+            elif user_selection == 'knowledge':
+                return SystemState.KNOWLEDGE_FLOW
+        
+        elif current_state == SystemState.SKILLS_GREETING:
+            # Route based on whether user has seed data
+            has_seed_data = self.state_manager.get_state_data('has_seed_data', None)
+            if has_seed_data is True:
+                # User has seed data, go directly to data generation
+                return SystemState.DATA_GENERATION
+            elif has_seed_data is False:
+                # User needs to create seed data
+                return SystemState.SEED_DATA_CREATION
+        
+        elif current_state == SystemState.REVIEW_EXIT:
+            # Route based on user's decision
+            user_decision = self.state_manager.get_state_data('user_decision', None)
+            if user_decision == 'change':
+                return SystemState.SEED_DATA_CREATION
+            elif user_decision == 'menu':
+                return SystemState.GREETING_INTENT
+            # If 'accept', don't transition (stay in current state or end)
+        
+        # For other states, take the first (primary) next state
+        return next_states[0] if next_states else None
     
     def get_current_state_info(self) -> Dict[str, Any]:
         """Get information about the current state."""
@@ -218,20 +241,26 @@ class MultiAgentController:
     def _get_state_description(self, state: SystemState) -> str:
         """Get description for a given state."""
         descriptions = {
-            SystemState.SEED_DATA_CREATION: "Create structured seed data JSON file from user requirements",
-            SystemState.SEED_DATA_ITERATION: "Refine seed data based on user feedback and iterations",
+            SystemState.GREETING_INTENT: "Welcome users and detect their intent for routing",
+            SystemState.GENERAL_QA: "Answer questions about sdg_hub and InstructLab",
+            SystemState.KNOWLEDGE_FLOW: "Handle knowledge data requests (placeholder)",
+            SystemState.SKILLS_GREETING: "Explain skills data and determine user's starting point",
+            SystemState.SEED_DATA_CREATION: "Create structured seed data JSONL file from user requirements",
             SystemState.DATA_GENERATION: "Generate synthetic training data using approved seed data",
-            SystemState.CLOSE_RESTART: "Session complete - choose to restart or close"
+            SystemState.REVIEW_EXIT: "Review generated data and handle user decisions"
         }
         return descriptions.get(state, "Unknown state")
     
     def _get_completion_criteria(self, state: SystemState) -> str:
         """Get completion criteria for a given state."""
         criteria = {
-            SystemState.SEED_DATA_CREATION: "Valid seed_data.json file created with all required fields",
-            SystemState.SEED_DATA_ITERATION: "User approval received OR maximum iterations (3) reached",
+            SystemState.GREETING_INTENT: "User selects from available options (General Q&A, Skills, Knowledge)",
+            SystemState.GENERAL_QA: "User indicates they want to return to main menu or are done",
+            SystemState.KNOWLEDGE_FLOW: "User acknowledges the placeholder message",
+            SystemState.SKILLS_GREETING: "User indicates whether they have seed data or need to create it",
+            SystemState.SEED_DATA_CREATION: "Valid seed_data.jsonl file created and user approves",
             SystemState.DATA_GENERATION: "Synthetic data successfully generated and saved",
-            SystemState.CLOSE_RESTART: "User chooses to restart or close session"
+            SystemState.REVIEW_EXIT: "User chooses to accept, make changes, or return to menu"
         }
         return criteria.get(state, "Unknown criteria")
     
@@ -254,7 +283,11 @@ class MultiAgentController:
 **Completion Criteria**: {state_info['completion_criteria']}
 **Next States**: {', '.join(state_info['next_states']) if state_info['next_states'] else 'None'}
 
-**State Flow**: State-1 → State-2 → State-3 → State-4 → State-1 (loop)
+**State Flow**: 
+State-0 (Greeting) → State-1 (General Q&A) | State-2 (Knowledge) | State-3 (Skills Greeting)
+State-3 → State-4 (Seed Data Creator) | State-5 (Data Generator)
+State-4 → State-5 → State-6 (Review & Exit)
+State-6 → State-4 (changes) | State-0 (menu)
 """
         return status.strip()
     

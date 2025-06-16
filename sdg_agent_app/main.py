@@ -79,10 +79,13 @@ def print_help():
 🤖 **Multi-Agent SDG System Help**
 
 **System States:**
-- State-1: Seed Data Creation - Create structured seed data from requirements
-- State-2: Seed Data Iteration - Refine seed data based on feedback  
-- State-3: Data Generation - Generate synthetic training data
-- State-4: Close/Restart - Complete session or start over
+- State-0: Greeting & Intent Detection - Welcome users and route to appropriate function
+- State-1: General Q&A - Answer questions about SDG Hub and InstructLab
+- State-2: Knowledge Flow - Handle knowledge data requests (placeholder)
+- State-3: Skills Greeting - Explain skills data and determine starting point
+- State-4: Seed Data Creator - Create structured seed data from requirements
+- State-5: Data Generator - Generate synthetic training data
+- State-6: Review & Exit - Review results and choose next steps
 
 **Commands:**
 - 'status' - Show current system state and information
@@ -90,12 +93,15 @@ def print_help():
 - 'exit' or 'quit' - End the session
 
 **State-Specific Actions:**
-- State-1: Describe your data requirements
-- State-2: Provide feedback on seed data or approve it
-- State-3: Specify generation parameters (count, variation, format)
-- State-4: Type 'restart' for new cycle or 'close' to end
+- State-0: Choose from General Q&A, Skills Data Generation, or Knowledge Data
+- State-1: Ask questions about SDG Hub, InstructLab, or synthetic data generation
+- State-2: Acknowledge that knowledge data is not yet supported
+- State-3: Indicate whether you have seed data or need to create it
+- State-4: Describe your data requirements and approve seed data
+- State-5: Specify generation parameters and review progress
+- State-6: Accept results, request changes, or return to main menu
 
-**Flow:** State-1 → State-2 → State-3 → State-4 → State-1 (loop)
+**Flow:** State-0 → (State-1|State-2|State-3) → State-4 → State-5 → State-6 → (State-0|State-4)
 """
     print(help_text)
 
@@ -108,11 +114,12 @@ async def demo_session():
     controller = MultiAgentController()
     
     demo_prompts = [
-        "I need to generate training data for a customer service chatbot. The chatbot should help customers with order inquiries.",
-        "That looks good, but can you make the seed question more specific about tracking order status?",
-        "Yes, I approve this seed data.",
-        "Generate 5 examples with medium variation in JSON format.",
-        "restart"
+        "Hello! I'd like to generate skills data for training.",
+        "I don't have seed data yet, I need to create it.",
+        "I need to generate training data for a customer service chatbot. The chatbot should help customers with order inquiries and tracking.",
+        "That looks good, I approve this seed data.",
+        "Generate 5 examples with medium variation in JSONL format.",
+        "That looks great! I accept these results."
     ]
     
     print(controller.get_system_status())
