@@ -16,7 +16,7 @@ import asyncio
 import time
 from dotenv import load_dotenv
 from google.adk.cli.utils import logs
-from mcp_agents import MultiAgentController, SystemState
+from sdg_hub_assistant import MultiAgentController, SystemState
 
 load_dotenv(override=True)
 logs.log_to_tmp_folder()

@@ -1,17 +1,3 @@
-# Copyright 2025 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import os
 from google.adk.agents import LlmAgent
 from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset, StdioServerParameters
@@ -19,6 +5,7 @@ from google.adk.models.lite_llm import LiteLlm
 
 
 ROOT_FOLDER_PATH = "/Users/gxxu/Desktop/sdg-hub-folder/"
+TARGET_FOLDER_PATH = "/Users/gxxu/Desktop/sdg-hub-folder/code-rag-mcp"
 
 
 general_qa_agent = LlmAgent(
@@ -54,15 +41,23 @@ User indicates they want to return to the main menu or are done with questions.
 Remember: You handle State 1 (General Q&A). Focus on being helpful and informative about the SDG Hub ecosystem.''',
 
     tools=[
-        MCPToolset(
-            connection_params=StdioServerParameters(
-                command='npx',
-                args=[
-                    "-y",
-                    "@modelcontextprotocol/server-filesystem",
-                    os.path.abspath(ROOT_FOLDER_PATH),
-                ],
-            ),
+            MCPToolset(
+                connection_params=StdioServerParameters(
+                    command="uv",
+                    cwd=TARGET_FOLDER_PATH,
+                    env={
+                        "GITHUB_REPO": "sdg_hub",
+                        "GITHUB_OWNER": "Red-Hat-AI-Innovation-Team",
+                    },
+                    args=[
+                        "run",
+                        "--with",
+                        "mcp",
+                        "mcp",
+                        "run",
+                        "code_rag_mcp/server.py",
+                    ],
+                ),
         )
     ],
 ) 
