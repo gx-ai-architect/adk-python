@@ -19,7 +19,11 @@ The system uses intelligent routing across 7 states:
 ## Quick Start
 
 ```bash
+# install adk in previous dir
+cd ..
+pip install -e .
 cd sdg_agent_app
+pip install -e requirements.txt
 adk web
 ```
 
@@ -32,8 +36,11 @@ Then open your browser to the URL shown (typically http://localhost:8000).
 export OPENAI_API_KEY=your_openai_api_key
 ```
 
+
 2. Setup the SDG Hub MCP server:
 https://github.com/Red-Hat-AI-Innovation-Team/sdg-mcp-server
 
 That's it! The system will guide you through creating training data with natural language interaction.
 
+
+3. Update the Hardcoded Root Dir / Target Dir in agents

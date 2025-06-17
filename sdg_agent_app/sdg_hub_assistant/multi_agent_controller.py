@@ -94,8 +94,9 @@ class MultiAgentController:
     
     async def send_message(self, message: str) -> str:
         """Send a message to the current state's agent."""
+        # Check if state transition is needed
+        await self._check_state_transition(message)
         current_state = self.state_manager.get_current_state()
-        
         # Check for global restart command first (available from any state)
         if message.lower().strip() in ['restart', 'reset', 'start over', 'fresh start']:
             self.state_manager.force_fresh_start()
@@ -153,8 +154,7 @@ class MultiAgentController:
         
         full_response = '\n'.join(response_parts) if response_parts else "I'm sorry, I couldn't generate a response. Please try again."
         
-        # Check if state transition is needed
-        await self._check_state_transition(message)
+
         
         return full_response
     
