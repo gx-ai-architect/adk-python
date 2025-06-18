@@ -145,7 +145,7 @@ class MCPSessionManager:
           StdioServerParameters, SseServerParams, StreamableHTTPServerParams
       ],
       errlog: TextIO = sys.stderr,
-      timeout: float = 300,
+      timeout: float = 100000,
   ):
     """Initializes the MCP session manager.
 
