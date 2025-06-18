@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict, Any, Optional, TextIO
+from typing import Dict, Any, Optional, TextIO, List
 from google.adk.agents import LlmAgent
 from google.adk.runners import InMemoryRunner
 from google.adk.sessions import Session
@@ -7,6 +7,9 @@ from google.genai import types
 from google.adk.tools.mcp_tool.mcp_session_manager import StdioServerParameters, SseServerParams
 import os
 import sys
+import json
+from dataclasses import dataclass
+from datetime import datetime
 
 from .state_manager import StateManager, SystemState
 from .routing_agent import routing_agent
@@ -21,15 +24,30 @@ from .agents import (
 )
 
 
+@dataclass
+class ConversationTurn:
+    """Represents a single conversation turn between user and agent."""
+    timestamp: str
+    user_message: str
+    agent_response: str
+    agent_name: str
+    state_name: str
+
+
 class MultiAgentController:
     """Controls the multi-agent synthetic data generation system."""
     
-    def __init__(self, app_name: str = 'sdg_multi_agent_system', start_fresh: bool = True, *, errlog: TextIO = sys.stderr):
+    def __init__(self, app_name: str = 'sdg_multi_agent_system', start_fresh: bool = True, 
+                 conversation_history_limit: int = 8, *, errlog: TextIO = sys.stderr):
         self.app_name = app_name
         # Force a fresh start by default to avoid state persistence issues
         self.state_manager = StateManager(start_fresh=start_fresh)
         
-        # Initialize runners for each agent
+        # Simple conversation history tracking - make these explicit public attributes
+        self.conversation_history: List[ConversationTurn] = []
+        self.conversation_history_limit: int = conversation_history_limit
+        
+        # Initialize runners for each agent (without complex memory services)
         self.runners = {
             SystemState.GREETING_INTENT: InMemoryRunner(
                 agent=greeting_agent,
@@ -75,7 +93,65 @@ class MultiAgentController:
         self._errlog = errlog
         
         print(f"🤖 Multi-Agent Controller initialized in {self.state_manager.get_current_state().name}")
+        print(f"💬 Conversation history limit: {self.conversation_history_limit} turns")
     
+    @property
+    def context_history(self) -> List[ConversationTurn]:
+        """Get the conversation history as a public attribute."""
+        return self.conversation_history
+    
+    @property
+    def context_history_limit(self) -> int:
+        """Get the conversation history limit as a public attribute."""
+        return self.conversation_history_limit
+    
+    @context_history_limit.setter
+    def context_history_limit(self, value: int):
+        """Set the conversation history limit."""
+        if value < 1:
+            raise ValueError("Context history limit must be at least 1")
+        self.conversation_history_limit = value
+        print(f"💬 Updated conversation history limit to {value} turns")
+
+    def _debug_print_conversation_history(self, agent_name: str):
+        """Debug function to print conversation history that will be sent to the agent."""
+        print(f"\n💬 [CONVERSATION DEBUG] Agent '{agent_name}' will see:")
+        print("=" * 60)
+        
+        if not self.conversation_history:
+            print("   📭 No conversation history")
+        else:
+            recent_history = self.conversation_history[-self.conversation_history_limit:]
+            print(f"   📚 Last {len(recent_history)} conversation turns (limit: {self.conversation_history_limit}):")
+            
+            for i, turn in enumerate(recent_history, 1):
+                print(f"   {i:2d}. [{turn.timestamp}] {turn.state_name}")
+                user_msg = turn.user_message[:80] + "..." if len(turn.user_message) > 80 else turn.user_message
+                agent_msg = turn.agent_response[:80] + "..." if len(turn.agent_response) > 80 else turn.agent_response
+                print(f"       User: {user_msg}")
+                print(f"       {turn.agent_name}: {agent_msg}")
+                print()
+        
+        print("=" * 60)
+        print()
+
+    def _build_conversation_context(self, current_user_message: str) -> str:
+        """Build conversation context from recent history to prepend to current message."""
+        if not self.conversation_history:
+            return current_user_message
+        
+        recent_history = self.conversation_history[-self.conversation_history_limit:]
+        
+        context_parts = ["Previous conversation context:"]
+        for turn in recent_history:
+            context_parts.append(f"User: {turn.user_message}")
+            context_parts.append(f"Assistant ({turn.agent_name}): {turn.agent_response}")
+        
+        context_parts.append("Current message:")
+        context_parts.append(f"User: {current_user_message}")
+        
+        return "\n".join(context_parts)
+
     async def initialize_session(self) -> Session:
         """Initialize a session for the current state's agent."""
         current_state = self.state_manager.get_current_state()
@@ -90,6 +166,10 @@ class MultiAgentController:
         )
         
         self.current_session = session
+        
+        # Debug: Show what conversation history this agent will see
+        self._debug_print_conversation_history(f"{current_state.name}_agent")
+        
         return session
     
     async def send_message(self, message: str) -> str:
@@ -97,10 +177,12 @@ class MultiAgentController:
         # Check if state transition is needed
         await self._check_state_transition(message)
         current_state = self.state_manager.get_current_state()
+        
         # Check for global restart command first (available from any state)
         if message.lower().strip() in ['restart', 'reset', 'start over', 'fresh start']:
             self.state_manager.force_fresh_start()
             self.current_session = None  # Reset session
+            self.conversation_history.clear()  # Clear conversation history
             return ("🔄 **System Reset Complete**\n\n"
                    "Returned to **State 0: Greeting & Intent Detection**\n\n"
                    "All previous state has been cleared. Ready to start fresh.\n"
@@ -111,9 +193,12 @@ class MultiAgentController:
         
         runner = self.runners[current_state]
         
+        # Build message with conversation context
+        contextual_message = self._build_conversation_context(message)
+        
         content = types.Content(
             role='user', 
-            parts=[types.Part.from_text(text=message)]
+            parts=[types.Part.from_text(text=contextual_message)]
         )
         
         # Use a more robust approach to handle async generator issues
@@ -154,10 +239,30 @@ class MultiAgentController:
         
         full_response = '\n'.join(response_parts) if response_parts else "I'm sorry, I couldn't generate a response. Please try again."
         
-
+        # Save this conversation turn to history
+        self._save_conversation_turn(message, full_response, current_state)
         
         return full_response
     
+    def _save_conversation_turn(self, user_message: str, agent_response: str, state: SystemState):
+        """Save a conversation turn to the history."""
+        turn = ConversationTurn(
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            user_message=user_message,
+            agent_response=agent_response,
+            agent_name=f"{state.name}_agent",
+            state_name=state.name
+        )
+        
+        self.conversation_history.append(turn)
+        print(f"💾 Saved conversation turn (total: {len(self.conversation_history)} turns)")
+        
+        # Keep only recent history to prevent unlimited growth
+        if len(self.conversation_history) > self.conversation_history_limit * 2:
+            # Keep double the limit to have some buffer
+            self.conversation_history = self.conversation_history[-self.conversation_history_limit * 2:]
+            print(f"🗂️ Trimmed conversation history to {len(self.conversation_history)} turns")
+
     async def _check_state_transition(self, user_message: str):
         """Check if current state is complete and transition if needed using routing agent."""
         current_state = self.state_manager.get_current_state()
@@ -196,12 +301,17 @@ class MultiAgentController:
                             print(f"🔍 Transition success: {transition_success}")
                             
                             if transition_success:
-                                # Reset session for new agent
+                                # Reset session for new agent (conversation history is preserved)
                                 self.current_session = None
                                 # Clear completion flags for the new state
                                 self.state_manager.set_state_data('agent_completed', False)
                                 self.state_manager.set_state_data('user_approved', False)
                                 print(f"🔄 **State Transition**: {current_state.name} → {target_state.name}")
+                                
+                                # Initialize new session and explicitly pass context
+                                await self.initialize_session()
+                                await self.pass_context_to_new_agent(target_state)
+                                
                                 return True
         
         # Also check for routing decisions even if state isn't "complete"
@@ -239,12 +349,17 @@ class MultiAgentController:
                     print(f"🔍 Global transition success: {transition_success}")
                     
                     if transition_success:
-                        # Reset session for new agent
+                        # Reset session for new agent (conversation history is preserved)
                         self.current_session = None
                         # Clear completion flags for the new state
                         self.state_manager.set_state_data('agent_completed', False)
                         self.state_manager.set_state_data('user_approved', False)
                         print(f"🔄 **State Transition**: {current_state.name} → {target_state.name}")
+                        
+                        # Initialize new session and explicitly pass context
+                        await self.initialize_session()
+                        await self.pass_context_to_new_agent(target_state)
+                        
                         return True
         
         print(f"🔍 No state transition occurred")
@@ -351,12 +466,16 @@ State-6 → State-4 (changes) | State-0 (menu)
         try:
             await self.initialize_routing_session()
             
+            # Build conversation context for routing agent
+            context_for_routing = self._build_conversation_context(user_message)
+            
             # Create routing prompt with current context
             legal_state_names = [state.name for state in legal_states]
             routing_prompt = f"""
 Current State: {current_state.name}
 Legal Next States: {', '.join(legal_state_names)}
-User Message: "{user_message}"
+
+{context_for_routing}
 
 Analyze the user's intent and respond with a JSON object containing the target state keyword.
 Only choose from the legal next states listed above, or use "STAY" if no transition is appropriate.
@@ -364,6 +483,7 @@ Only choose from the legal next states listed above, or use "STAY" if no transit
             
             print(f"🔍 Routing Debug - Current: {current_state.name}, Legal: {legal_state_names}")
             print(f"🔍 User Message: {user_message}")
+            print(f"🔍 Context passed to routing agent: {len(context_for_routing)} characters")
             
             content = types.Content(
                 role='user',
@@ -385,7 +505,6 @@ Only choose from the legal next states listed above, or use "STAY" if no transit
             print(f"🔍 Routing Agent Response: {routing_response}")
             
             # Parse JSON response
-            import json
             try:
                 # Clean up the response - sometimes models add extra text
                 routing_response_clean = routing_response.strip()
@@ -423,4 +542,81 @@ Only choose from the legal next states listed above, or use "STAY" if no transit
                 
         except Exception as e:
             print(f"⚠️ Error in routing decision: {e}")
-            return 'STAY' 
+            return 'STAY'
+    
+    async def pass_context_to_new_agent(self, new_state: SystemState) -> bool:
+        """Explicitly pass conversation context to a new agent after state transition."""
+        if not self.conversation_history:
+            print(f"🔄 No context to pass to {new_state.name} agent")
+            return True
+        
+        if not self.current_session:
+            print(f"⚠️ No active session for {new_state.name} agent")
+            return False
+        
+        # Build context message for the new agent
+        recent_history = self.conversation_history[-min(3, len(self.conversation_history)):]
+        
+        context_parts = [
+            f"[SYSTEM CONTEXT] You are now handling the conversation in {new_state.name} state.",
+            f"[SYSTEM CONTEXT] Here is the recent conversation context:",
+            ""
+        ]
+        
+        for turn in recent_history:
+            context_parts.append(f"User: {turn.user_message}")
+            context_parts.append(f"Previous Agent ({turn.agent_name}): {turn.agent_response}")
+            context_parts.append("")
+        
+        context_parts.append("[SYSTEM CONTEXT] Please continue the conversation based on this context.")
+        context_message = "\n".join(context_parts)
+        
+        try:
+            print(f"🔄 Explicitly passing context to {new_state.name} agent ({len(context_message)} chars)")
+            
+            runner = self.runners[new_state]
+            context_content = types.Content(
+                role='user',
+                parts=[types.Part.from_text(text=context_message)]
+            )
+            
+            # Send context and consume response (don't save it as conversation turn)
+            async for event in runner.run_async(
+                user_id=self.user_id,
+                session_id=self.current_session.id,
+                new_message=context_content,
+            ):
+                pass  # We just want to establish context, not save the response
+            
+            print(f"✅ Context successfully passed to {new_state.name} agent")
+            return True
+            
+        except Exception as e:
+            print(f"⚠️ Failed to pass context to {new_state.name} agent: {e}")
+            return False 
+
+    def debug_context_passing(self) -> str:
+        """Debug method to inspect context passing state."""
+        current_state = self.state_manager.get_current_state()
+        
+        debug_info = [
+            "=== CONTEXT PASSING DEBUG ===",
+            f"Current State: {current_state.name}",
+            f"Active Session: {self.current_session is not None}",
+            f"Routing Session: {self.routing_session is not None}",
+            f"Conversation History Length: {len(self.conversation_history)}",
+            f"History Limit: {self.conversation_history_limit}",
+            ""
+        ]
+        
+        if self.conversation_history:
+            debug_info.append("Last 2 conversation turns:")
+            recent = self.conversation_history[-2:]
+            for i, turn in enumerate(recent, 1):
+                debug_info.append(f"  {i}. {turn.state_name} - {turn.timestamp}")
+                debug_info.append(f"     User: {turn.user_message[:50]}...")
+                debug_info.append(f"     Agent: {turn.agent_response[:50]}...")
+        else:
+            debug_info.append("No conversation history")
+        
+        return "\n".join(debug_info) 
